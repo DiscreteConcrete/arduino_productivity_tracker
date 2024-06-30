@@ -6,11 +6,9 @@
 #include "arduino_secrets.h"
 
 // Configuration flags
-const bool TEST_MODE = false;
-const bool DEBUGGING_MODE = true;
-const bool NO_LOG_SENDING_MODE = false; // don't send logs to IFTTT
-
-// Replace with your IFTTT webhook details
+const bool TEST_MODE = false; // run tests - note that very little time went into this
+const bool DO_LOG_SENDING_MODE = false; // don't send logs to IFTTT or GraphQL
+ith your IFTTT webhook details
 const char* ifttt_host = "maker.ifttt.com";
 const int ifttt_port = 443;
 const char* webhookPath = SECRET_IFTTT_WEBHOOK_PATH;
@@ -194,10 +192,8 @@ public:
     debugLog(ip2Str(WiFi.localIP()));
   }
 
-  bool sendRequest(const String& jsonPayload) {
-    if (NO_LOG_SENDING_MODE) {
-      return true;
-    }
+bool seO_LOG_SENDING_MODE) {
+      r
 
     digitalWrite(LED_BUILTIN, HIGH); // Turn on the built-in LED during the request
 
@@ -222,10 +218,8 @@ public:
     return statusCode == 200;
   }
 
-  bool sendGraphQLRequest(const String& jsonPayload) {
-    if (NO_LOG_SENDING_MODE) {
-      return true;
-    }
+bool seO_LOG_SENDING_MODE) {
+      r
 
     digitalWrite(LED_BUILTIN, HIGH); // Turn on the built-in LED during the request
 
@@ -379,9 +373,7 @@ void setup() {
   timeClient.begin();
   timeClient.update();
 
-  if (!NO_LOG_SENDING_MODE) {
-    network.sendRequest(RequestBuilder::buildLogPayload({0, project, state}));
-  }
+  network.sendRequest(RequestBuilder::buildLogPayload({0, project, state}));
 
   rgbLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
   stateLed.updateStateLeds(project, state);
