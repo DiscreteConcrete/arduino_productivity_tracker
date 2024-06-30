@@ -1,0 +1,31 @@
+# Ignore build folders
+/build/
+/*.bin
+/*.elf
+/*.hex
+
+# Ignore temporary files
+*.tmp
+*.log
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore Arduino libraries
+/libraries/
+
+# Ignore Arduino IDE settings
+*.ino.*
+*.cpp.*
+*.h.*
+
+# Ignore user-specific files
+*.swp
+*.swo
+
+# Ignore other IDEs' settings
+.vscode/
+.idea/
+
+arduino_secrets.h
