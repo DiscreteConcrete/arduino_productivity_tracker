@@ -68,7 +68,7 @@ Project projects[] = {
 // Previous pressed button index
 byte previousPressedButtonIndex = 0;
 
-const unsigned long BACKOFF_TIME = 2000; // Backoff time (in milliseconds)
+const unsigned long BACKOFF_TIME = 3000; // Backoff time (in milliseconds)
 unsigned long lastButtonPressTime = 0; // Time of the last button press
 unsigned long firstButtonPressTime = 0; // Time of the first button press in a sequence
 bool logPending = false; // Whether a log is pending submission
