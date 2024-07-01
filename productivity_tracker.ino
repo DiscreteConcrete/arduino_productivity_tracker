@@ -7,8 +7,10 @@
 
 // Configuration flags
 const bool TEST_MODE = false; // run tests - note that very little time went into this
-const bool DO_LOG_SENDING_MODE = false; // don't send logs to IFTTT or GraphQL
-ith your IFTTT webhook details
+const bool DEBUGGING_MODE = false; // send debug logs to Serial - note that requires Serial listening in order to start
+const bool NO_LOG_SENDING_MODE = false; // don't send logs to IFTTT or GraphQL
+
+// Replace with your IFTTT webhook details
 const char* ifttt_host = "maker.ifttt.com";
 const int ifttt_port = 443;
 const char* webhookPath = SECRET_IFTTT_WEBHOOK_PATH;
@@ -192,8 +194,10 @@ public:
     debugLog(ip2Str(WiFi.localIP()));
   }
 
-bool seO_LOG_SENDING_MODE) {
-      r
+  bool sendRequest(const String& jsonPayload) {
+    if (NO_LOG_SENDING_MODE) {
+      return true;
+    }
 
     digitalWrite(LED_BUILTIN, HIGH); // Turn on the built-in LED during the request
 
@@ -218,8 +222,10 @@ bool seO_LOG_SENDING_MODE) {
     return statusCode == 200;
   }
 
-bool seO_LOG_SENDING_MODE) {
-      r
+  bool sendGraphQLRequest(const String& jsonPayload) {
+    if (NO_LOG_SENDING_MODE) {
+      return true;
+    }
 
     digitalWrite(LED_BUILTIN, HIGH); // Turn on the built-in LED during the request
 
@@ -373,7 +379,9 @@ void setup() {
   timeClient.begin();
   timeClient.update();
 
-  network.sendRequest(RequestBuilder::buildLogPayload({0, project, state}));
+  if (!NO_LOG_SENDING_MODE) {
+    network.sendRequest(RequestBuilder::buildLogPayload({0, project, state}));
+  }
 
   rgbLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
   stateLed.updateStateLeds(project, state);
