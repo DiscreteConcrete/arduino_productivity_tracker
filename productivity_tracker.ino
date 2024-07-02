@@ -76,7 +76,6 @@ unsigned long firstButtonPressTime = 0; // Time of the first button press in a s
 bool logPending = false; // Whether a log is pending submission
 bool awaitingSecondDigit = false; // Whether we are waiting for a second digit
 char firstDigit = '\0'; // First digit of the project selection
-unsigned long previousLogTime = 0; // Time of the previous log
 int backdateCount = 0; // Count of how many times the backdate button was pressed
 
 uint8_t project = 0;
@@ -381,11 +380,8 @@ void setup() {
   network.setup();
 
   timeClient.begin();
-  timeClient.update();
-
-  if (!NO_LOG_SENDING_MODE) {
-    network.sendRequest(RequestBuilder::buildLogPayload({0, project, state}));
-  }
+  currentLog = createCurrentLog(); // will also run the first timeClient.update()
+  // note that the first log is not sent anywhere
 
   rgbLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
   stateLed.updateStateLeds(project, state);
