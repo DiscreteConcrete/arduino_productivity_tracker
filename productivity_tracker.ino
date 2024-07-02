@@ -2,7 +2,6 @@
 #include <ArduinoHttpClient.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <Int64String.h>
 #include "arduino_secrets.h"
 
 // Configuration flags
@@ -55,16 +54,16 @@ const char* defaultStates[5] = {"Deep work", "Getting organized", "Meetings", "C
 
 // Define projects and their states
 Project projects[] = {
-  {0, "Idle", {63, 0, 0}, {"Default", "", "", "", ""}, false},
-  {1, "Distracted", {255, 0, 0}, {"Default", "", "", "", ""}, false},
-  {2, "Basic human needs", {255, 127, 0}, {"Default", "", "", "", ""}, false},
-  {3, "Entertainment", {255, 255, 0}, {"Default", "", "", "", ""}, false},
-  {4, "Family", {0, 255, 0}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true},
-  {5, "Personal", {0, 0, 255}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true},
-  {6, "Work", {143, 0, 255}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true},
-  {7, "Project7", {255, 0, 255}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true},
-  {8, "Project8", {0, 255, 255}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true},
-  {9, "Project9", {255, 255, 255}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true}
+  {0, "Idle", {63, 0, 0}, {emptyStates[0], emptyStates[1], emptyStates[2], emptyStates[3], emptyStates[4]}, false},
+  {1, "Distracted", {255, 0, 0}, {emptyStates[0], emptyStates[1], emptyStates[2], emptyStates[3], emptyStates[4]}, false},
+  {2, "Basic human needs", {255, 127, 0}, {emptyStates[0], emptyStates[1], emptyStates[2], emptyStates[3], emptyStates[4]}, false},
+  {3, "Entertainment", {255, 255, 0}, {emptyStates[0], emptyStates[1], emptyStates[2], emptyStates[3], emptyStates[4]}, false},
+  {4, "Family", {0, 255, 0}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true},
+  {5, "Personal", {0, 0, 255}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true},
+  {6, "Work", {143, 0, 255}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true},
+  {7, "Project7", {255, 0, 255}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true},
+  {8, "Project8", {0, 255, 255}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true},
+  {9, "Project9", {255, 255, 255}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true}
 };
 
 // Previous pressed button index
@@ -122,15 +121,6 @@ public:
     }
   }
 
-  void setStateLeds(bool led0, bool led1, bool led2, bool led3, bool led4) {
-    // Ensure only one state LED is on at a time due to shared resistor
-    digitalWrite(pins[0], led0 ? HIGH : LOW);
-    digitalWrite(pins[1], led1 ? HIGH : LOW);
-    digitalWrite(pins[2], led2 ? HIGH : LOW);
-    digitalWrite(pins[3], led3 ? HIGH : LOW);
-    digitalWrite(pins[4], led4 ? HIGH : LOW);
-  }
-
   void updateStateLeds(uint8_t project, uint8_t state) {
     // Ensure only one state LED is on at a time due to shared resistor
     setStateLeds(false, false, false, false, false);
@@ -146,6 +136,16 @@ public:
       case 3: setStateLeds(false, false, false, true, false); break;
       case 4: setStateLeds(false, false, false, false, true); break;
     }
+  }
+
+private:
+  // This is private so that we can ensure only one state LED is on at a time due to shared resistor
+  void setStateLeds(bool led0, bool led1, bool led2, bool led3, bool led4) {
+    digitalWrite(pins[0], led0 ? HIGH : LOW);
+    digitalWrite(pins[1], led1 ? HIGH : LOW);
+    digitalWrite(pins[2], led2 ? HIGH : LOW);
+    digitalWrite(pins[3], led3 ? HIGH : LOW);
+    digitalWrite(pins[4], led4 ? HIGH : LOW);
   }
 };
 
@@ -176,12 +176,14 @@ String ip2Str(IPAddress ip) {
 class Network {
   WiFiSSLClient wifiClient;
   HttpClient httpClient;
+  HttpClient graphqlClient;
   const char* ssid;
   const char* password;
 
 public:
   Network(const char* ssid, const char* password)
-    : ssid(ssid), password(password), httpClient(wifiClient, ifttt_host, ifttt_port) {}
+    : ssid(ssid), password(password), httpClient(wifiClient, ifttt_host, ifttt_port), 
+      graphqlClient(wifiClient, graphql_host, graphql_port) {}
 
   void setup() {
     debugLogLn("Connecting to WiFi...");
@@ -196,63 +198,50 @@ public:
   }
 
   bool sendRequest(const String& jsonPayload) {
+    return performHTTPRequest(httpClient, webhookPath, ifttt_host, jsonPayload);
+  }
+
+  bool sendGraphQLRequest(const String& jsonPayload) {
+    return performHTTPRequest(graphqlClient, graphql_path, graphql_host, jsonPayload, graphql_auth_token);
+  }
+
+private:
+  bool performHTTPRequest(HttpClient &client, const char* path, const char* host, const String& jsonPayload, const char* authToken = nullptr) {
     if (NO_LOG_SENDING_MODE) {
       return true;
     }
 
-    digitalWrite(LED_BUILTIN, HIGH); // Turn on the built-in LED during the request
+    toggleLED(true);
 
-    httpClient.beginRequest();
-    httpClient.post(webhookPath);
-    httpClient.sendHeader("Host", ifttt_host);
-    httpClient.sendHeader("Content-Type", "application/json");
-    httpClient.sendHeader("Content-Length", jsonPayload.length());
-    httpClient.sendHeader("Connection", "close");
-    httpClient.beginBody();
-    httpClient.print(jsonPayload);
-    httpClient.endRequest();
+    client.beginRequest();
+    client.post(path);
+    client.sendHeader("Host", host);
+    client.sendHeader("Content-Type", "application/json");
+    client.sendHeader("Content-Length", jsonPayload.length());
+    client.sendHeader("Connection", "close");
+    if (authToken) {
+      client.sendHeader("Authorization", authToken);
+    }
+    client.beginBody();
+    client.print(jsonPayload);
+    client.endRequest();
 
-    int statusCode = httpClient.responseStatusCode();
-    String response = httpClient.responseBody();
+    int statusCode = client.responseStatusCode();
+    String response = client.responseBody();
 
     debugLogLn("Status code: " + String(statusCode));
     debugLogLn("Response: " + response);
 
-    digitalWrite(LED_BUILTIN, LOW); // Turn off the built-in LED after the request
+    toggleLED(false);
 
     return statusCode == 200;
   }
 
-  bool sendGraphQLRequest(const String& jsonPayload) {
-    if (NO_LOG_SENDING_MODE) {
-      return true;
-    }
-
-    digitalWrite(LED_BUILTIN, HIGH); // Turn on the built-in LED during the request
-
-    HttpClient graphqlClient(wifiClient, graphql_host, graphql_port);
-    graphqlClient.beginRequest();
-    graphqlClient.post(graphql_path);
-    graphqlClient.sendHeader("Host", graphql_host);
-    graphqlClient.sendHeader("Content-Type", "application/json");
-    graphqlClient.sendHeader("Authorization", graphql_auth_token);
-    graphqlClient.sendHeader("Content-Length", jsonPayload.length());
-    graphqlClient.sendHeader("Connection", "close");
-    graphqlClient.beginBody();
-    graphqlClient.print(jsonPayload);
-    graphqlClient.endRequest();
-
-    int statusCode = graphqlClient.responseStatusCode();
-    String response = graphqlClient.responseBody();
-
-    debugLogLn("GraphQL Status code: " + String(statusCode));
-    debugLogLn("GraphQL Response: " + response);
-
-    digitalWrite(LED_BUILTIN, LOW); // Turn off the built-in LED after the request
-
-    return statusCode == 200;
+  void toggleLED(bool state) {
+    digitalWrite(LED_BUILTIN, state ? HIGH : LOW);
   }
 };
+
 
 // RequestBuilder class
 class RequestBuilder {
@@ -342,7 +331,7 @@ const byte signalIndexToButtonIndex[numberOfButtons + 1] = {0, 16, 12, 8, 4, 15,
 const char* buttonLabels[17] = {"", "1", "2", "3", "A", "4", "5", "6", "B", "7", "8", "9", "C", "*", "0", "#", "D"};
 
 // Global instances
-RgbLed rgbLed(3, 5, 4, 0.2, 1, 0.15);
+RgbLed projectLed(3, 5, 4, 0.2, 1, 0.15);
 const byte stateLedPins[5] = {2, 1, 0, 7, 8};
 StateLed stateLed(stateLedPins);
 Network network(SECRET_WIFI_SSID, SECRET_WIFI_PASSWORD);
@@ -366,7 +355,7 @@ void setup() {
     return;
   }
 
-  rgbLed.setup();
+  projectLed.setup();
   stateLed.setup();
   
   if (DEBUGGING_MODE) {
@@ -383,7 +372,7 @@ void setup() {
   currentLog = createCurrentLog(); // will also run the first timeClient.update()
   // note that the first log is not sent anywhere
 
-  rgbLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
+  projectLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
   stateLed.updateStateLeds(project, state);
 }
 
@@ -471,7 +460,7 @@ Project getProjectById(uint8_t projectId) {
     }
   }
   // If not found, return a default project
-  Project defaultProject = {projectId, "Unknown Project", {255, 255, 255}, {"Deep work", "Getting organized", "Meetings", "Communication", "Bureaucracy"}, true};
+  Project defaultProject = {projectId, "Unknown Project", {255, 255, 255}, {defaultStates[0], defaultStates[1], defaultStates[2], defaultStates[3], defaultStates[4]}, true};
   return defaultProject;
 }
 
@@ -485,7 +474,7 @@ void selectProject(uint8_t selectedProject) {
     project = proj.index;
     debugLogLn("Updating project to: " + String(proj.name));
     state = 0;
-    rgbLed.setColor(proj.color[0], proj.color[1], proj.color[2]);
+    projectLed.setColor(proj.color[0], proj.color[1], proj.color[2]);
     stateLed.updateStateLeds(project, state);
     backdateCount = 0; // Reset backdate count on project change
   }
@@ -536,16 +525,17 @@ bool createGraphQLEntry(Log log) {
 }
 
 void runTestMode() {
-  rgbLed.setColor(255, 255, 0);
+  // first test out the RGB light to make sure we can see if tests succeeded!
+  projectLed.setColor(255, 0, 0);
   delay(500);
-  rgbLed.setColor(0, 255, 0);
+  projectLed.setColor(0, 255, 0);
   delay(500);
-  rgbLed.setColor(0, 0, 255);
+  projectLed.setColor(0, 0, 255);
   delay(500);
   if (test()) {
-    rgbLed.setColor(0, 255, 0);
+    projectLed.setColor(0, 255, 0);
   } else {
-    rgbLed.setColor(255, 0, 0);
+    projectLed.setColor(255, 0, 0);
   }
 }
 
