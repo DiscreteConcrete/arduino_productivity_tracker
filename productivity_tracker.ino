@@ -31,7 +31,9 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org");
 
 // Structure for logging
 struct Log {
-  uint16_t time;
+  unsigned long created_at; // Real-time timestamp in seconds since epoch
+  unsigned long started_at; // Real-time timestamp in seconds since epoch, can be backdated
+  unsigned long time_since_reboot; // Seconds since the last device restart
   uint8_t project;
   uint8_t state;
 };
@@ -258,7 +260,9 @@ class RequestBuilder {
 public:
   static String buildLogPayload(Log log) {
     String jsonPayload = "{";
-    jsonPayload += "\"time\":" + String(log.time) + ",";
+    jsonPayload += "\"created_at\":" + String(log.created_at) + ",";
+    jsonPayload += "\"started_at\":" + String(log.started_at) + ",";
+    jsonPayload += "\"time_since_reboot\":" + String(log.time_since_reboot) + ",";
     jsonPayload += "\"project\":" + String(log.project) + ",";
     jsonPayload += "\"state\":" + String(log.state);
     jsonPayload += "}";
@@ -266,10 +270,10 @@ public:
   }
 
   // time is expect to be milliseconds since start of epoch
-  static String buildGraphQLPayload(Log log, uint64_t time) {
+  static String buildGraphQLPayload(Log log) {
     String jsonPayload = "{";
     jsonPayload += "\"query\":\"mutation ($NewProcrastinationLogInput: NewProcrastinationLogInput!) { newProcrastinationLog(NewProcrastinationLogInput: $NewProcrastinationLogInput) { success errors { message queryPathKey __typename } instanceIdToNavigateTo __typename } }\",";
-    jsonPayload += "\"variables\":{\"NewProcrastinationLogInput\":{\"title\":\"Procrastination alert!\",\"description\":\"Tom has been procrastinating for more than 5 minutes now! \[Sent from Tom's Arduino\]\",\"startTime\":\"" + int64String(time) + "\"}}";
+    jsonPayload += "\"variables\":{\"NewProcrastinationLogInput\":{\"title\":\"Procrastination alert!\",\"description\":\"Tom has been procrastinating for more than 5 minutes now! \[Sent from Tom's Arduino\]\",\"startTime\":\"" + String(log.started_at) + "000\"}}";
     jsonPayload += "}";
     return jsonPayload;
   }
@@ -420,7 +424,7 @@ void loop() {
   }
 
   // Check if there is a 5-minute procrastination log ready to be submitted
-  if (currentLog.project == 1 && !currentLogWasSubmittedToGraphQL && ((millis()/1000 - currentLog.time) >= 300)) {
+  if (currentLog.project == 1 && !currentLogWasSubmittedToGraphQL && ((millis()/1000 - currentLog.time_since_reboot) >= 300)) {
     currentLogWasSubmittedToGraphQL = true;
     createGraphQLEntry(currentLog);
   }
@@ -508,35 +512,31 @@ void selectState(uint8_t selectedState) {
  * Creates the current Log, considering any backdate adjustments.
  * @return the Log
  */
-Log createCurrentLog () {
-  unsigned long currentTime = millis() / 1000;
-  unsigned long logTime = currentTime - (backdateCount * 300); // 300 seconds = 5 minutes
-  // Ensure the log time does not backdate to before the previous log time
-  if (logTime <= previousLogTime) {
-    logTime = previousLogTime + 1;
-  }
-
-  previousLogTime = logTime;
-  backdateCount = 0; // Reset backdate count after logging
-
-  return { logTime, project, state };
+Log createCurrentLog() {
+  timeClient.update();
+  unsigned long time_since_reboot = millis() / 1000; // Current uptime in seconds
+  unsigned long created_at = timeClient.getEpochTime(); // Get current epoch time from NTP server in seconds
+  unsigned long started_at = created_at - (backdateCount * 300); // Adjust for any backdate
+  
+  backdateCount = 0; // Reset after logging
+  
+  return {created_at, started_at, time_since_reboot, project, state};
 }
 
 /**
- * Logs the current Log
+ * Logs the current Log with IFTTT webhook
  * @return True if the log was successfully sent, false otherwise.
  */
 bool logProjectAndState(Log log) {
   return network.sendRequest(RequestBuilder::buildLogPayload(log));
 }
 
-bool createGraphQLEntry (Log log) {
-  unsigned long currentTime = millis() / 1000;
-  unsigned long backdateSeconds = currentTime - log.time; // how much time we actually backdated
-
-  const unsigned long timeSeconds = timeClient.getEpochTime();
-  uint64_t time = uint64_t(timeSeconds - backdateSeconds) * 1000;
-  return network.sendGraphQLRequest(RequestBuilder::buildGraphQLPayload(log, time));
+/**
+ * Logs the current Log with GraphQL endpoint
+ * @return True if the log was successfully sent, false otherwise.
+ */
+bool createGraphQLEntry(Log log) {
+  return network.sendGraphQLRequest(RequestBuilder::buildGraphQLPayload(log));
 }
 
 void runTestMode() {
