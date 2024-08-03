@@ -198,15 +198,7 @@ public:
       graphqlClient(wifiClient, graphql_host, graphql_port) {}
 
   void setup() {
-    debugLogLn("Connecting to WiFi...");
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(1000);
-      debugLog(".");
-    }
-    debugLogLn("Connected to WiFi!");
-    debugLogLn("Device IP Address: ");
-    debugLog(ip2Str(WiFi.localIP()));
+    connectWiFi();
   }
 
   bool sendRequest(const String& jsonPayload) {
@@ -218,9 +210,30 @@ public:
   }
 
 private:
-  bool performHTTPRequest(HttpClient &client, const char* path, const char* host, const String& jsonPayload, const char* authToken = nullptr) {
-    if (NO_LOG_SENDING_MODE) {
+  bool connectWiFi() {
+    debugLogLn("Connecting to WiFi...");
+    WiFi.begin(ssid, password);
+    int retryCount = 0;
+    while (WiFi.status() != WL_CONNECTED && retryCount < 10) {
+      delay(1000);
+      debugLog(".");
+      retryCount++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      debugLogLn("Connected to WiFi!");
+      debugLogLn("Device IP Address: ");
+      debugLogLn(ip2Str(WiFi.localIP()));
       return true;
+    } else {
+      debugLogLn("Failed to connect to WiFi.");
+      return false;
+    }
+  }
+
+  bool performHTTPRequest(HttpClient &client, const char* path, const char* host, const String& jsonPayload, const char* authToken = nullptr) {
+    if (NO_LOG_SENDING_MODE || WiFi.status() != WL_CONNECTED) {
+      return false;
     }
 
     toggleLED(true);
@@ -398,6 +411,7 @@ Log readLastLogFromSD();
 Config readConfigFromSD();
 void writeConfigToSD(Config config);
 bool processUnsubmittedLogs(unsigned long lastSetLogCreatedAt);
+bool updateTimeClient();
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -430,14 +444,20 @@ void setup() {
   currentLog = readLastLogFromSD();
   if (currentLog.created_at == 0) {
     // If reading the last log failed, create a new dummy log
-    currentLog = createCurrentLog(); // will also run the first timeClient.update()
+    if (updateTimeClient()) {
+      currentLog = createCurrentLog(); // will also run the first timeClient.update()
+    } else {
+      currentLog = {0, 0, 0, 0, 0}; // Create a default log if time update fails
+    }
   } else {
     // Update project and state according to the loaded currentLog
     project = currentLog.project;
     state = currentLog.state;
 
     // Run the first timeClient.update() as it was not run by createCurrentLog
-    timeClient.update();
+    if (!updateTimeClient()) {
+      debugLogLn("Failed to update time client. Time-related functions might not work properly.");
+    }
   }
 
   // Compute reboot epoch time
@@ -758,7 +778,11 @@ bool processUnsubmittedLogs(unsigned long lastSetLogCreatedAt) {
  */
 bool logProjectAndState(Log log) {
   sdCardLogger.logToFile(log); // Save log to SD card
-  return network.sendRequest(RequestBuilder::buildLogPayload(log));
+  bool success = network.sendRequest(RequestBuilder::buildLogPayload(log));
+  if (!success) {
+    debugLogLn("Failed to send log via IFTTT webhook. Log saved to SD card for retry.");
+  }
+  return success;
 }
 
 /**
@@ -787,4 +811,18 @@ void runTestMode() {
 bool test() {
   // Implement actual test logic here
   return true;
+}
+
+/**
+ * Updates the NTPClient time
+ * @return true if the time update was successful, false otherwise
+ */
+bool updateTimeClient() {
+  for (int i = 0; i < 5; i++) { // Retry up to 5 times
+    if (timeClient.update()) {
+      return true;
+    }
+    delay(1000);
+  }
+  return false;
 }
