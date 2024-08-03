@@ -80,6 +80,7 @@ bool logPending = false; // Whether a log is pending submission
 bool awaitingSecondDigit = false; // Whether we are waiting for a second digit
 char firstDigit = '\0'; // First digit of the project selection
 int backdateCount = 0; // Count of how many times the backdate button was pressed
+unsigned long rebooted_at; // Epoch time at startup
 
 uint8_t project = 0;
 uint8_t state = 0;
@@ -412,6 +413,7 @@ void setup() {
   timeClient.begin();
   currentLog = createCurrentLog(); // will also run the first timeClient.update()
   // note that the first log is not sent anywhere
+  rebooted_at = currentLog.created_at - (millis() / 1000); // Compute reboot epoch time
 
   projectLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
   stateLed.updateStateLeds(project, state);
@@ -450,7 +452,7 @@ void loop() {
   }
 
   // Check if there is a 5-minute procrastination log ready to be submitted
-  if (currentLog.project == 1 && !currentLogWasSubmittedToGraphQL && ((millis()/1000 - currentLog.time_since_reboot) >= 300)) {
+  if (currentLog.project == 1 && !currentLogWasSubmittedToGraphQL && ((millis() / 1000 + rebooted_at) - currentLog.started_at >= 300)) {
     currentLogWasSubmittedToGraphQL = true;
     createGraphQLEntry(currentLog);
   }
