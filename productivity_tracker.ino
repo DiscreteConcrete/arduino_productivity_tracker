@@ -7,7 +7,7 @@
 
 // Configuration flags
 const bool TEST_MODE = false; // run tests - note that very little time went into this
-const bool DEBUGGING_MODE = false; // send debug logs to Serial - note that requires Serial listening in order to start
+const bool DEBUGGING_MODE = true; // send debug logs to Serial - note that requires Serial listening in order to start
 const bool NO_LOG_SENDING_MODE = false; // don't send logs to IFTTT or GraphQL
 
 // Replace with your IFTTT webhook details
@@ -387,6 +387,7 @@ bool createGraphQLEntry();
 void runTestMode();
 bool test();
 Project getProjectById(uint8_t projectId);
+Log readLastLogFromSD();
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -398,7 +399,7 @@ void setup() {
 
   projectLed.setup();
   stateLed.setup();
-  
+
   if (DEBUGGING_MODE) {
     Serial.begin(9600);
     while (!Serial) {
@@ -411,10 +412,25 @@ void setup() {
   sdCardLogger.setup();
 
   timeClient.begin();
-  currentLog = createCurrentLog(); // will also run the first timeClient.update()
-  // note that the first log is not sent anywhere
-  rebooted_at = currentLog.created_at - (millis() / 1000); // Compute reboot epoch time
 
+  // Attempt to read the last log from the SD card
+  currentLog = readLastLogFromSD();
+  if (currentLog.created_at == 0) {
+    // If reading the last log failed, create a new dummy log
+    currentLog = createCurrentLog(); // will also run the first timeClient.update()
+  } else {
+    // Update project and state according to the loaded currentLog
+    project = currentLog.project;
+    state = currentLog.state;
+
+    // Run the first timeClient.update() as it was not run by createCurrentLog
+    timeClient.update();
+  }
+
+  // Compute reboot epoch time
+  rebooted_at = timeClient.getEpochTime() - (millis() / 1000);
+
+  // Note that the first log is not sent anywhere
   projectLed.setColor(projects[project].color[0], projects[project].color[1], projects[project].color[2]);
   stateLed.updateStateLeds(project, state);
 }
@@ -549,6 +565,68 @@ Log createCurrentLog() {
   backdateCount = 0; // Reset after logging
   
   return {created_at, started_at, time_since_reboot, project, state};
+}
+
+/**
+ * Reads the last log from the SD card and parses it into a Log struct.
+ * @return the last Log
+ */
+Log readLastLogFromSD() {
+  Log log;
+  File logFile = SD.open("logs.csv", FILE_READ);
+  
+  if (logFile) {
+    debugLogLn("SD card file opened successfully.");
+    logFile.seek(logFile.size()); // Move to the end of the file
+    int endPosition = logFile.position();
+    debugLogLn("End position in file: " + String(endPosition));
+    String lastLine = "";
+    
+    // Read file backwards to find the last line
+    for (int i = endPosition - 1; i >= 0; i--) {
+      logFile.seek(i);
+      char c = logFile.read();
+      if (c == '\n' && lastLine.length() > 0) {
+        break;
+      }
+      lastLine = c + lastLine;
+    }
+    logFile.close();
+
+    debugLogLn("Last line read from SD card: " + lastLine);
+
+    if (lastLine.length() > 0) {
+      int commaIndex = 0;
+      int lastCommaIndex = 0;
+      int fieldIndex = 0;
+
+      while ((commaIndex = lastLine.indexOf(',', lastCommaIndex)) != -1) {
+        String field = lastLine.substring(lastCommaIndex, commaIndex);
+        lastCommaIndex = commaIndex + 1;
+
+        debugLogLn("Field " + String(fieldIndex) + ": " + field);
+
+        switch (fieldIndex) {
+          case 0: log.created_at = field.toInt(); break;
+          case 1: log.started_at = field.toInt(); break;
+          case 2: log.time_since_reboot = field.toInt(); break;
+          case 3: log.project = field.toInt(); break;
+        }
+        fieldIndex++;
+      }
+      log.state = lastLine.substring(lastCommaIndex).toInt();
+      debugLogLn("Log state: " + String(log.state));
+      return log;
+    } else {
+      debugLogLn("No last line found in the file.");
+    }
+  } else {
+    debugLogLn("Failed to open SD card file.");
+  }
+  
+  // Return a default log if reading fails
+  debugLogLn("Returning default log.");
+  return {0, 0, 0, 0, 0};
 }
 
 /**
