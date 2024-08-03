@@ -7,7 +7,7 @@
 
 // Configuration flags
 const bool TEST_MODE = false; // run tests - note that very little time went into this
-const bool DEBUGGING_MODE = true; // send debug logs to Serial - note that requires Serial listening in order to start
+const bool DEBUGGING_MODE = false; // send debug logs to Serial - note that requires Serial listening in order to start
 const bool NO_LOG_SENDING_MODE = false; // don't send logs to IFTTT or GraphQL
 
 // Replace with your IFTTT webhook details
@@ -86,6 +86,13 @@ uint8_t project = 0;
 uint8_t state = 0;
 Log currentLog;
 bool currentLogWasSubmittedToGraphQL = false;
+
+// Configuration struct
+struct Config {
+  unsigned long lastSetLogCreatedAt;
+};
+
+Config config;
 
 // RGB LED class
 class RgbLed {
@@ -382,12 +389,15 @@ SdCardLogger sdCardLogger(chipSelect, "logs.csv");
 void handleButtonPress(char pressedButton);
 void selectProject(uint8_t selectedProject);
 void selectState(uint8_t selectedState);
-bool logProjectAndState();
-bool createGraphQLEntry();
+bool logProjectAndState(Log log);
+bool createGraphQLEntry(Log log);
 void runTestMode();
 bool test();
 Project getProjectById(uint8_t projectId);
 Log readLastLogFromSD();
+Config readConfigFromSD();
+void writeConfigToSD(Config config);
+bool processUnsubmittedLogs(unsigned long lastSetLogCreatedAt);
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -412,6 +422,9 @@ void setup() {
   sdCardLogger.setup();
 
   timeClient.begin();
+
+  // Load configuration
+  config = readConfigFromSD();
 
   // Attempt to read the last log from the SD card
   currentLog = readLastLogFromSD();
@@ -454,9 +467,26 @@ void loop() {
   // Check if backoff time has passed and a log is pending
   if (logPending && (millis() - lastButtonPressTime >= BACKOFF_TIME)) {
     if (project != currentLog.project || state != currentLog.state) {
+
+      debugLogLn("Checking for unsubmitted logs. Current log created_at: " + String(currentLog.created_at) + ", lastSetLogCreatedAt: " + String(config.lastSetLogCreatedAt));
+      
+      // Check if there are any unsubmitted logs only if the current log has a later created_at time
+      if (currentLog.created_at > config.lastSetLogCreatedAt) {
+        processUnsubmittedLogs(config.lastSetLogCreatedAt);
+      }
+
       currentLog = createCurrentLog();
       currentLogWasSubmittedToGraphQL = false;
-      logProjectAndState(currentLog);
+      debugLogLn("Created new log with created_at: " + String(currentLog.created_at));
+      bool logSent = logProjectAndState(currentLog);
+
+      if (logSent) {
+        config.lastSetLogCreatedAt = currentLog.created_at;
+        debugLogLn("Log successfully sent. Updating lastSetLogCreatedAt to: " + String(config.lastSetLogCreatedAt));
+        writeConfigToSD(config);
+      } else {
+        debugLogLn("Failed to send log.");
+      }
     }
     logPending = false;
   }
@@ -574,12 +604,9 @@ Log createCurrentLog() {
 Log readLastLogFromSD() {
   Log log;
   File logFile = SD.open("logs.csv", FILE_READ);
-  
   if (logFile) {
-    debugLogLn("SD card file opened successfully.");
     logFile.seek(logFile.size()); // Move to the end of the file
     int endPosition = logFile.position();
-    debugLogLn("End position in file: " + String(endPosition));
     String lastLine = "";
     
     // Read file backwards to find the last line
@@ -593,8 +620,6 @@ Log readLastLogFromSD() {
     }
     logFile.close();
 
-    debugLogLn("Last line read from SD card: " + lastLine);
-
     if (lastLine.length() > 0) {
       int commaIndex = 0;
       int lastCommaIndex = 0;
@@ -603,8 +628,6 @@ Log readLastLogFromSD() {
       while ((commaIndex = lastLine.indexOf(',', lastCommaIndex)) != -1) {
         String field = lastLine.substring(lastCommaIndex, commaIndex);
         lastCommaIndex = commaIndex + 1;
-
-        debugLogLn("Field " + String(fieldIndex) + ": " + field);
 
         switch (fieldIndex) {
           case 0: log.created_at = field.toInt(); break;
@@ -615,18 +638,118 @@ Log readLastLogFromSD() {
         fieldIndex++;
       }
       log.state = lastLine.substring(lastCommaIndex).toInt();
-      debugLogLn("Log state: " + String(log.state));
       return log;
-    } else {
-      debugLogLn("No last line found in the file.");
     }
-  } else {
-    debugLogLn("Failed to open SD card file.");
   }
   
   // Return a default log if reading fails
-  debugLogLn("Returning default log.");
   return {0, 0, 0, 0, 0};
+}
+
+/**
+ * Reads the configuration from the SD card.
+ * @return the Config struct
+ */
+Config readConfigFromSD() {
+  Config config = {0}; // Initialize with default values
+  File configFile = SD.open("config.txt", FILE_READ);
+  
+  if (configFile) {
+    debugLogLn("Config file opened successfully.");
+    while (configFile.available()) {
+      String line = configFile.readStringUntil('\n');
+      int separatorIndex = line.indexOf('=');
+      if (separatorIndex > 0) {
+        String key = line.substring(0, separatorIndex);
+        String value = line.substring(separatorIndex + 1);
+
+        if (key == "lastSetLogCreatedAt") {
+          config.lastSetLogCreatedAt = value.toInt();
+          debugLogLn("Loaded lastSetLogCreatedAt: " + String(config.lastSetLogCreatedAt));
+        }
+      }
+    }
+    configFile.close();
+  } else {
+    debugLogLn("Failed to open config file. Using default values.");
+  }
+  
+  return config;
+}
+
+/**
+ * Writes the configuration to the SD card.
+ * @param config The Config struct to write
+ */
+void writeConfigToSD(Config config) {
+  File configFile = SD.open("config.txt", FILE_WRITE);
+  if (configFile) {
+    configFile.println("lastSetLogCreatedAt=" + String(config.lastSetLogCreatedAt));
+    configFile.close();
+    debugLogLn("Config file written successfully.");
+  } else {
+    debugLogLn("Failed to open config file for writing.");
+  }
+}
+
+/**
+ * Processes unsubmitted logs directly from the SD card.
+ * @param lastSetLogCreatedAt The timestamp of the last sent log
+ * @return true if all logs were processed successfully, false otherwise
+ */
+bool processUnsubmittedLogs(unsigned long lastSetLogCreatedAt) {
+  File logFile = SD.open("logs.csv", FILE_READ);
+  
+  if (!logFile) {
+    debugLogLn("Failed to open log file.");
+    return false;
+  }
+
+  bool allLogsProcessed = true;
+  
+  while (logFile.available()) {
+    String line = logFile.readStringUntil('\n');
+    if (line.length() > 0) {
+      Log log;
+      int commaIndex = 0;
+      int lastCommaIndex = 0;
+      int fieldIndex = 0;
+
+      while ((commaIndex = line.indexOf(',', lastCommaIndex)) != -1) {
+        String field = line.substring(lastCommaIndex, commaIndex);
+        lastCommaIndex = commaIndex + 1;
+
+        switch (fieldIndex) {
+          case 0: log.created_at = field.toInt(); break;
+          case 1: log.started_at = field.toInt(); break;
+          case 2: log.time_since_reboot = field.toInt(); break;
+          case 3: log.project = field.toInt(); break;
+        }
+        fieldIndex++;
+      }
+      log.state = line.substring(lastCommaIndex).toInt();
+
+      debugLogLn("Processing log with created_at: " + String(log.created_at) + ", lastSetLogCreatedAt: " + String(lastSetLogCreatedAt));
+
+      if (log.created_at > lastSetLogCreatedAt) {
+        bool success = logProjectAndState(log);
+        if (!success) {
+          allLogsProcessed = false;
+          debugLogLn("Failed to send log with created_at: " + String(log.created_at));
+          break; // Stop processing if a log fails to send
+        }
+        lastSetLogCreatedAt = log.created_at;
+        config.lastSetLogCreatedAt = lastSetLogCreatedAt;
+        writeConfigToSD(config);
+        debugLogLn("Unsubmitted log sent successfully. Updated lastSetLogCreatedAt to: " + String(lastSetLogCreatedAt));
+      } else {
+        debugLogLn("Skipping already processed log with created_at: " + String(log.created_at));
+      }
+    }
+  }
+  
+  logFile.close();
+  return allLogsProcessed;
 }
 
 /**
