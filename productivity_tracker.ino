@@ -2,6 +2,7 @@
 #include <ArduinoHttpClient.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <SD.h>
 #include "arduino_secrets.h"
 
 // Configuration flags
@@ -23,6 +24,9 @@ const char* graphql_host = SECRET_GRAPHQL_HOST;
 const int graphql_port = 443;
 const char* graphql_path = SECRET_GRAPHQL_PATH;
 const char* graphql_auth_token = SECRET_GRAPHQL_AUTH_TOKEN;
+
+// SD card details
+const int chipSelect = 6;
 
 // time tracking
 WiFiUDP ntpUDP;
@@ -242,6 +246,41 @@ private:
   }
 };
 
+// SD Card Logger class
+class SdCardLogger {
+  const int chipSelect;
+  const char* filename;
+
+public:
+  SdCardLogger(int cs, const char* fname) : chipSelect(cs), filename(fname) {}
+
+  void setup() {
+    if (!SD.begin(chipSelect)) {
+      debugLogLn("SD card initialization failed!");
+      return;
+    }
+    debugLogLn("SD card initialized.");
+  }
+
+  void logToFile(Log log) {
+    File logFile = SD.open(filename, FILE_WRITE);
+    if (logFile) {
+      logFile.print(log.created_at);
+      logFile.print(",");
+      logFile.print(log.started_at);
+      logFile.print(",");
+      logFile.print(log.time_since_reboot);
+      logFile.print(",");
+      logFile.print(log.project);
+      logFile.print(",");
+      logFile.println(log.state);
+      logFile.close();
+      debugLogLn("Log written to SD card.");
+    } else {
+      debugLogLn("Failed to open log file.");
+    }
+  }
+};
 
 // RequestBuilder class
 class RequestBuilder {
@@ -336,6 +375,7 @@ const byte stateLedPins[5] = {2, 1, 0, 11, 12};
 StateLed stateLed(stateLedPins);
 Network network(SECRET_WIFI_SSID, SECRET_WIFI_PASSWORD);
 Keypad keypad(numberOfButtons, measuredValues, signalIndexToButtonIndex, buttonLabels, A1);
+SdCardLogger sdCardLogger(chipSelect, "logs.csv");
 
 // Function prototypes
 void handleButtonPress(char pressedButton);
@@ -367,6 +407,7 @@ void setup() {
   }
 
   network.setup();
+  sdCardLogger.setup();
 
   timeClient.begin();
   currentLog = createCurrentLog(); // will also run the first timeClient.update()
@@ -513,6 +554,7 @@ Log createCurrentLog() {
  * @return True if the log was successfully sent, false otherwise.
  */
 bool logProjectAndState(Log log) {
+  sdCardLogger.logToFile(log); // Save log to SD card
   return network.sendRequest(RequestBuilder::buildLogPayload(log));
 }
 
