@@ -10,6 +10,10 @@ const bool TEST_MODE = false; // run tests - note that very little time went int
 const bool DEBUGGING_MODE = false; // send debug logs to Serial - note that requires Serial listening in order to start
 const bool NO_LOG_SENDING_MODE = false; // don't send logs to IFTTT or GraphQL
 
+// If ENABLE_STARTUP_WITHOUT_WIFI is false, setup will not complete without a successful WiFi connection and time update.
+// In the future, a time module will be used to ensure accurate time even without WiFi.
+const bool ENABLE_STARTUP_WITHOUT_WIFI = false; 
+
 // Replace with your IFTTT webhook details
 const char* ifttt_host = "maker.ifttt.com";
 const int ifttt_port = 443;
@@ -197,8 +201,8 @@ public:
     : ssid(ssid), password(password), httpClient(wifiClient, ifttt_host, ifttt_port), 
       graphqlClient(wifiClient, graphql_host, graphql_port) {}
 
-  void setup() {
-    connectWiFi();
+  bool setup() {
+    return connectWiFi();
   }
 
   bool sendRequest(const String& jsonPayload) {
@@ -432,7 +436,16 @@ void setup() {
     debugLogLn("Serial communication started.");
   }
 
-  network.setup();
+  bool wifiConnected = network.setup();
+  bool timeUpdated = updateTimeClient();
+
+  if (!ENABLE_STARTUP_WITHOUT_WIFI && (!wifiConnected || !timeUpdated)) {
+    debugLogLn("Startup without WiFi and updated time is not allowed. Halting setup.");
+    while (true) {
+      delay(1000); // Halt execution
+    }
+  }
+
   sdCardLogger.setup();
 
   timeClient.begin();
@@ -444,7 +457,7 @@ void setup() {
   currentLog = readLastLogFromSD();
   if (currentLog.created_at == 0) {
     // If reading the last log failed, create a new dummy log
-    if (updateTimeClient()) {
+    if (timeUpdated) {
       currentLog = createCurrentLog(); // will also run the first timeClient.update()
     } else {
       currentLog = {0, 0, 0, 0, 0}; // Create a default log if time update fails
@@ -455,7 +468,7 @@ void setup() {
     state = currentLog.state;
 
     // Run the first timeClient.update() as it was not run by createCurrentLog
-    if (!updateTimeClient()) {
+    if (!timeUpdated) {
       debugLogLn("Failed to update time client. Time-related functions might not work properly.");
     }
   }
