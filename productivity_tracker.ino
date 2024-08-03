@@ -332,7 +332,7 @@ const char* buttonLabels[17] = {"", "1", "2", "3", "A", "4", "5", "6", "B", "7",
 
 // Global instances
 RgbLed projectLed(3, 5, 4, 0.2, 1, 0.15);
-const byte stateLedPins[5] = {2, 1, 0, 7, 8};
+const byte stateLedPins[5] = {2, 1, 0, 11, 12};
 StateLed stateLed(stateLedPins);
 Network network(SECRET_WIFI_SSID, SECRET_WIFI_PASSWORD);
 Keypad keypad(numberOfButtons, measuredValues, signalIndexToButtonIndex, buttonLabels, A1);
