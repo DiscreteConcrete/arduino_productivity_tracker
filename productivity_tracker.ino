@@ -30,7 +30,7 @@ const char* graphql_path = SECRET_GRAPHQL_PATH;
 const char* graphql_auth_token = SECRET_GRAPHQL_AUTH_TOKEN;
 
 // SD card details
-const int chipSelect = 6;
+const int chipSelect = 7;
 
 // time tracking
 WiFiUDP ntpUDP;
@@ -395,8 +395,8 @@ const byte signalIndexToButtonIndex[numberOfButtons + 1] = {0, 16, 12, 8, 4, 15,
 const char* buttonLabels[17] = {"", "1", "2", "3", "A", "4", "5", "6", "B", "7", "8", "9", "C", "*", "0", "#", "D"};
 
 // Global instances
-RgbLed projectLed(3, 5, 4, 0.2, 1, 0.15);
-const byte stateLedPins[5] = {2, 1, 0, 11, 12};
+RgbLed projectLed(2, 3, 4, 0.2, 1, 0.15);
+const byte stateLedPins[5] = {1, 5, 11, 0, 12};
 StateLed stateLed(stateLedPins);
 Network network(SECRET_WIFI_SSID, SECRET_WIFI_PASSWORD);
 Keypad keypad(numberOfButtons, measuredValues, signalIndexToButtonIndex, buttonLabels, A1);
